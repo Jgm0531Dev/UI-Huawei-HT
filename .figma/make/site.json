@@ -1,1 +1,10 @@
-{}
+{
+  "description": "A smartwatch health monitor for tracking pulse, SpO2, movement, and emergency contacts, with demo controls to preview alerts and device states.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
