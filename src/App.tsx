@@ -13,7 +13,8 @@ import {
 export type PageId = "monitor" | "sensors" | "range" | "medical" | "contacts" | "settings"
 export type MonitorVariant = "normal" | "elevated" | "critical"
 export type DemoMode = "live" | "offline" | "first-use"
-export type AlertState = "none" | "are-you-ok" | "alert-sent"
+export type AlertState = "none" | "are-you-ok" | "sos-countdown" | "alert-sent"
+export type AlertReason = "pulso-critico" | "caida" | "sos-manual"
 export type SensorVariantMode = "live" | "measuring" | "permission"
 export type Spo2ScreenState = "idle" | "measuring" | "result" | "error"
 export type Spo2ResultVariant = "optimal" | "low" | "very-low"
@@ -25,10 +26,13 @@ export type DemoConfig = {
   fallDetection: boolean
   mode: DemoMode
   alertState: AlertState
+  alertReason: AlertReason
+  autoAlerts: boolean
   sensorMode: SensorVariantMode
   spo2ScreenState: Spo2ScreenState
   spo2Result: Spo2ResultVariant
   spo2MovementDetected: boolean
+  contactResponseStep: 0 | 1 | 2
   activeDetail: "none" | "spo2"
   medicalEmpty: boolean
   contactsEmpty: boolean
@@ -38,8 +42,10 @@ export type DemoContextType = {
   config: DemoConfig
   update: (next: Partial<DemoConfig>) => void
   triggerAreYouOk: () => void
+  triggerSosHelp: () => void
   triggerAlertSent: () => void
   dismissAlertWithToast: () => void
+  notifyContactsAndDismiss: () => void
   dismissAlert: () => void
   openSpo2Detail: () => void
   closeSpo2Detail: () => void
@@ -1564,68 +1570,106 @@ function PageIndicator({
   )
 }
 
-function AreYouOkScreen({
-  onSafe,
-  onEmergency,
+/* Anillo de cuenta regresiva compartido por "¿Estás bien?" y "Pidiendo ayuda". */
+function CountdownRing({
+  value,
+  total,
+  className = "",
 }: {
-  onSafe: () => void
-  onEmergency: () => void
+  value: number
+  total: number
+  className?: string
 }) {
-  const [seconds, setSeconds] = useState(30)
-  const timerRef = useRef<number | null>(null)
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  const strokeOffset = circumference - (circumference * (total - value)) / total
+
+  return (
+    <div className={`countdown-ring-container ${className}`}>
+      <svg className="countdown-ring-svg" viewBox="0 0 128 128" aria-hidden="true">
+        <circle
+          className="countdown-ring-track"
+          cx="64"
+          cy="64"
+          r={radius}
+          strokeWidth="8"
+        />
+        <circle
+          className="countdown-ring-progress"
+          cx="64"
+          cy="64"
+          r={radius}
+          strokeWidth="8"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeOffset}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="countdown-ring-text">
+        <strong className="countdown-number">{value}</strong>
+        <span className="countdown-unit">s</span>
+      </div>
+    </div>
+  )
+}
+
+/* Cuenta regresiva reutilizable: el callback se guarda en un ref para que el
+   intervalo no se reinicie en cada render. */
+function useCountdown(seconds: number, onFinish: () => void) {
+  const [remaining, setRemaining] = useState(seconds)
+  const finishRef = useRef(onFinish)
 
   useEffect(() => {
-    timerRef.current = window.setInterval(() => {
-      setSeconds((prev) => {
+    finishRef.current = onFinish
+  }, [onFinish])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setRemaining((prev) => {
         if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current)
-          onEmergency()
+          window.clearInterval(id)
+          finishRef.current()
           return 0
         }
         return prev - 1
       })
     }, 1000)
+    return () => window.clearInterval(id)
+  }, [])
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [onEmergency])
+  return remaining
+}
 
-  const radius = 54
-  const circumference = 2 * Math.PI * radius
-  const strokeOffset = circumference - (circumference * (30 - seconds)) / 30
+function vibrate(pattern: number | number[]) {
+  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+    navigator.vibrate?.(pattern)
+  }
+}
+
+function AreYouOkScreen({
+  reasonText,
+  onSafe,
+  onEmergency,
+}: {
+  reasonText: string
+  onSafe: () => void
+  onEmergency: () => void
+}) {
+  const seconds = useCountdown(30, onEmergency)
+
+  useEffect(() => {
+    vibrate(200)
+  }, [])
 
   return (
     <div className="are-you-ok-screen" role="alertdialog" aria-modal="true">
       <div className="are-you-ok-header">
-        <h2>¿ESTÁS BIEN?</h2>
-        <p>Avisaremos a tus contactos</p>
+        <h2>¿Estás bien?</h2>
       </div>
 
-      <div className="are-you-ok-countdown-container">
-        <svg className="are-you-ok-ring-svg" viewBox="0 0 128 128" aria-hidden="true">
-          <circle
-            className="countdown-ring-track"
-            cx="64"
-            cy="64"
-            r={radius}
-            strokeWidth="8"
-          />
-          <circle
-            className="countdown-ring-progress"
-            cx="64"
-            cy="64"
-            r={radius}
-            strokeWidth="8"
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeOffset}
-          />
-        </svg>
-        <div className="countdown-ring-text">
-          <strong className="countdown-number">{seconds}</strong>
-          <span className="countdown-unit">s</span>
-        </div>
-      </div>
+      <CountdownRing value={seconds} total={30} className="is-vibrating" />
+
+      <p className="are-you-ok-reason">{reasonText}</p>
 
       <div className="are-you-ok-stacked-buttons">
         <button
@@ -1650,85 +1694,167 @@ function AreYouOkScreen({
   )
 }
 
-function AlertSentScreen({
-  onCancelAlert,
+/* SOS manual: 5 s y cancelar. Sin pasar por la confirmación de 30 s. */
+function SosCountdownScreen({
+  onCancel,
+  onEmergency,
 }: {
-  onCancelAlert: () => void
+  onCancel: () => void
+  onEmergency: () => void
 }) {
-  const { config } = useDemo()
+  const seconds = useCountdown(5, onEmergency)
+
+  useEffect(() => {
+    vibrate([120, 60, 120])
+  }, [])
+
+  return (
+    <div className="sos-countdown-screen" role="alertdialog" aria-modal="true">
+      <div className="are-you-ok-header">
+        <h2>Pidiendo ayuda en {seconds}</h2>
+      </div>
+
+      <CountdownRing value={seconds} total={5} className="is-sos" />
+
+      <p className="are-you-ok-reason">SOS manual</p>
+
+      <div className="are-you-ok-stacked-buttons">
+        <button type="button" className="btn-cancel-sos" onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* Diálogo de confirmación compartido por "Cancelar alerta", "Llamar al 911"
+   y el aviso de "Añadir contacto". */
+function AlertConfirmDialog({
+  title,
+  description,
+  confirmLabel,
+  cancelLabel,
+  tone,
+  iconName,
+  hideCancel = false,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  description: string
+  confirmLabel: string
+  cancelLabel?: string
+  tone: "green" | "red"
+  iconName: "check" | "phone" | "warning"
+  hideCancel?: boolean
+  onConfirm: () => void
+  onCancel?: () => void
+}) {
+  return (
+    <div className="alert-confirm-dialog-overlay" role="dialog" aria-modal="true">
+      <div className="alert-confirm-dialog-card">
+        <div className={`confirm-warning-icon is-${tone}`}>
+          <Icon name={iconName} />
+        </div>
+        <h3>{title}</h3>
+        <p>{description}</p>
+        <div className="confirm-buttons-stack">
+          <button
+            type="button"
+            className={`confirm-yes-btn is-${tone}`}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+          {!hideCancel && (
+            <button type="button" className="confirm-stay-btn" onClick={onCancel}>
+              {cancelLabel}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AlertSentScreen() {
+  const { config, notifyContactsAndDismiss } = useDemo()
   const variant = monitorVariants[config.variant]
   const isOffline = config.mode === "offline"
+  const isEmpty = config.contactsEmpty
+  const responseStep = config.contactResponseStep
+  const isOnWay = responseStep === 2
 
   const [nextNoticeSeconds, setNextNoticeSeconds] = useState(300)
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [confirmation, setConfirmation] = useState<"cancel" | "call" | null>(null)
+  const [showAddContact, setShowAddContact] = useState(false)
   const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
+    if (isOnWay) return
     timerRef.current = window.setInterval(() => {
       setNextNoticeSeconds((prev) => (prev > 0 ? prev - 1 : 300))
     }, 1000)
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [])
+  }, [isOnWay])
 
   const minutes = String(Math.floor(nextNoticeSeconds / 60)).padStart(2, "0")
   const secs = String(nextNoticeSeconds % 60).padStart(2, "0")
   const timerDisplay = `${minutes}:${secs}`
 
+  const reasonText = isOffline
+    ? "Sin conexión"
+    : config.alertReason === "caida"
+      ? "Posible caída"
+      : config.alertReason === "sos-manual"
+        ? "SOS manual"
+        : `Pulso ${variant.bpm} BPM · Inmóvil`
+
+  const statusFor = (step: number) => {
+    if (isOffline) {
+      return { label: "Pendiente", type: "pending", icon: "wifiOff" as const }
+    }
+    if (step >= 2) {
+      return { label: "Va en camino", type: "onway", icon: "walking" as const }
+    }
+    if (step === 1) {
+      return { label: "Recibido", type: "received", icon: "check" as const }
+    }
+    return { label: "Enviado", type: "sent", icon: "check" as const }
+  }
+
   const contacts = [
-    {
-      id: "1",
-      name: "María López",
-      role: "Madre",
-      status: "Recibido",
-      type: "received",
-    },
-    {
-      id: "2",
-      name: "Carlos Gómez",
-      role: "Hermano",
-      status: "Va en camino",
-      type: "onway",
-    },
+    { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656", step: responseStep },
+    { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6", step: 1 },
   ]
 
   return (
     <div className="alert-sent-screen" role="alert" aria-modal="true">
-      <div className="alert-sent-content-scroll">
-        <div className="alert-sent-header">
-          <div className="alert-sent-check-circle">
-            <Icon name="check" />
-          </div>
-          <h2>Alerta enviada</h2>
-
-          {isOffline ? (
+      {/* Cabecera fija */}
+      <div className="alert-sent-header">
+        <div className={`alert-sent-check-circle ${isOffline ? "is-offline" : ""}`}>
+          <Icon name={isOffline ? "wifiOff" : "check"} />
+        </div>
+        <h2>Alerta enviada</h2>
+        <p className="alert-sent-reason">{reasonText}</p>
+        {isOffline && (
+          <>
             <div className="alert-offline-banner">
               <Icon name="wifiOff" />
-              <span>Sin conexión: reintentando…</span>
+              <span>Se enviará al recuperar señal</span>
             </div>
-          ) : (
-            <p className="alert-sent-subtitle">Alerta enviada a 2 contactos</p>
-          )}
-        </div>
+            <span className="alert-retry-indicator">
+              <span className="alert-pulsing-dot is-orange" />
+              Reintentando…
+            </span>
+          </>
+        )}
+      </div>
 
-        <div className="alert-contacts-container">
-          {contacts.map((contact) => (
-            <div key={contact.id} className="alert-contact-card">
-              <div className="alert-contact-info">
-                <strong>{contact.name}</strong>
-                <span>{contact.role}</span>
-              </div>
-              <span className={`alert-status-badge is-${contact.type}`}>
-                {contact.type === "onway" && <span className="alert-pulsing-dot" />}
-                {contact.type === "received" && <Icon name="check" />}
-                {contact.status}
-              </span>
-            </div>
-          ))}
-        </div>
-
+      {/* Contenido con scroll suave y degradado a negro arriba/abajo */}
+      <div className="alert-sent-content-scroll">
         <div className="alert-metrics-card">
           <div className="alert-metric-row">
             <Icon name="heart" />
@@ -1741,48 +1867,104 @@ function AlertSentScreen({
           </div>
         </div>
 
+        {isEmpty ? (
+          <div className="alert-empty-contacts">No tienes contactos de emergencia</div>
+        ) : (
+          <div className="alert-contacts-container">
+            {contacts.map((contact) => {
+              const status = statusFor(contact.step)
+              return (
+                <div key={contact.id} className="alert-contact-card">
+                  <div className="alert-contact-main">
+                    <div
+                      className="alert-contact-avatar"
+                      style={{ backgroundColor: contact.color }}
+                    >
+                      {contact.initials}
+                    </div>
+                    <div className="alert-contact-info">
+                      <strong>{contact.name}</strong>
+                      <span>{contact.role}</span>
+                    </div>
+                  </div>
+                  <span className={`alert-status-badge is-${status.type}`}>
+                    <Icon name={status.icon} />
+                    {status.label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         <div className="alert-timer-banner">
-          <small>Próximo aviso en {timerDisplay}</small>
+          <span>Próximo aviso en {timerDisplay}</span>
+          {isOnWay && <span className="alert-onway-note">María va en camino</span>}
         </div>
 
-        <div className="alert-cancel-action-wrap">
+        <div className="alert-action-buttons">
+          <button
+            type="button"
+            className={`alert-call-button ${isEmpty ? "is-primary" : ""}`}
+            onClick={() => setConfirmation("call")}
+          >
+            Llamar al 911
+          </button>
+          {isEmpty && (
+            <button
+              type="button"
+              className="alert-add-contact-button"
+              onClick={() => setShowAddContact(true)}
+            >
+              Añadir contacto
+            </button>
+          )}
           <button
             type="button"
             className="alert-cancel-button"
-            onClick={() => setShowConfirm(true)}
-            aria-label="Cancelar alerta de emergencia"
+            onClick={() => setConfirmation("cancel")}
           >
             Cancelar alerta
           </button>
         </div>
       </div>
 
-      {showConfirm && (
-        <div className="alert-confirm-dialog-overlay" role="dialog" aria-modal="true">
-          <div className="alert-confirm-dialog-card">
-            <div className="confirm-warning-icon">
-              <Icon name="warning" />
-            </div>
-            <h3>¿Cancelar alerta?</h3>
-            <p>Se avisará a tus contactos de que la emergencia fue descartada.</p>
-            <div className="confirm-buttons-stack">
-              <button
-                type="button"
-                className="confirm-yes-btn"
-                onClick={onCancelAlert}
-              >
-                Sí, cancelar alerta
-              </button>
-              <button
-                type="button"
-                className="confirm-stay-btn"
-                onClick={() => setShowConfirm(false)}
-              >
-                Continuar alerta
-              </button>
-            </div>
-          </div>
-        </div>
+      {confirmation === "cancel" && (
+        <AlertConfirmDialog
+          title="¿Ya estás bien?"
+          description="Avisaremos a tus contactos"
+          confirmLabel="Sí, estoy bien"
+          cancelLabel="Volver"
+          tone="green"
+          iconName="check"
+          onConfirm={notifyContactsAndDismiss}
+          onCancel={() => setConfirmation(null)}
+        />
+      )}
+
+      {confirmation === "call" && (
+        <AlertConfirmDialog
+          title="¿Llamar al 911?"
+          description="Simulación: no se iniciará una llamada real."
+          confirmLabel="Llamar"
+          cancelLabel="Cancelar"
+          tone="red"
+          iconName="phone"
+          onConfirm={() => setConfirmation(null)}
+          onCancel={() => setConfirmation(null)}
+        />
+      )}
+
+      {showAddContact && (
+        <AlertConfirmDialog
+          title="Elige desde tu teléfono"
+          description="Añade y administra tus contactos desde la app de salud."
+          confirmLabel="Entendido"
+          tone="green"
+          iconName="check"
+          hideCancel
+          onConfirm={() => setShowAddContact(false)}
+        />
       )}
     </div>
   )
@@ -1816,6 +1998,11 @@ function DemoPanel() {
     { id: "optimal", label: "Óptimo" },
     { id: "low", label: "Bajo" },
     { id: "very-low", label: "Muy bajo" },
+  ]
+  const alertReasons: { id: AlertReason; label: string }[] = [
+    { id: "pulso-critico", label: "Pulso crítico sin movimiento" },
+    { id: "caida", label: "Posible caída" },
+    { id: "sos-manual", label: "SOS manual" },
   ]
 
   if (!isExpanded) {
@@ -1886,18 +2073,10 @@ function DemoPanel() {
                       : {}
                   }
                   onClick={() => {
-                    if (option.id === "critical") {
-                      update({
-                        variant: "critical",
-                        alertState: "are-you-ok",
-                        mode: config.mode === "first-use" ? "live" : config.mode,
-                      })
-                    } else {
-                      update({
-                        variant: option.id,
-                        mode: config.mode === "first-use" ? "live" : config.mode,
-                      })
-                    }
+                    update({
+                      variant: option.id,
+                      mode: config.mode === "first-use" ? "live" : config.mode,
+                    })
                   }}
                 >
                   <span
@@ -2109,6 +2288,45 @@ function DemoPanel() {
         {/* Botones de acción y flujo de emergencia */}
         <div className="demo-group">
           <span className="demo-group-label">Flujo de Emergencia y Modos</span>
+
+          <div className="demo-reason-selector" role="group" aria-label="Motivo de la alerta">
+            <span className="demo-group-label">Motivo de la alerta</span>
+            {alertReasons.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={`demo-reason-btn ${config.alertReason === option.id ? "is-selected" : ""}`}
+                aria-pressed={config.alertReason === option.id}
+                onClick={() => update({ alertReason: option.id })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="demo-switch-list">
+            <button
+              type="button"
+              className="demo-switch-item"
+              role="switch"
+              aria-checked={config.autoAlerts}
+              onClick={() => update({ autoAlerts: !config.autoAlerts })}
+            >
+              <span className="demo-switch-label">
+                <strong>Alertas automáticas</strong>
+                <small>
+                  {config.autoAlerts ? "Crítico + Inmóvil tras 3 s" : "Desactivadas"}
+                </small>
+              </span>
+              <span
+                className={`demo-switch-toggle ${config.autoAlerts ? "is-on" : ""}`}
+                aria-hidden="true"
+              >
+                <span className="demo-switch-thumb" />
+              </span>
+            </button>
+          </div>
+
           <div className="demo-buttons-grid">
             <button
               type="button"
@@ -2120,6 +2338,22 @@ function DemoPanel() {
                 <span>Simular alerta</span>
               </div>
               <small>Lanza ¿Estás bien?</small>
+            </button>
+
+            <button
+              type="button"
+              className="demo-action-btn"
+              onClick={() =>
+                update({
+                  contactResponseStep: Math.min(2, config.contactResponseStep + 1) as 0 | 1 | 2,
+                })
+              }
+            >
+              <div className="demo-action-text">
+                <Icon name="check" className="demo-btn-icon" />
+                <span>Simular respuesta de contacto</span>
+              </div>
+              <small>{["Enviado", "Recibido", "Va en camino"][config.contactResponseStep]}</small>
             </button>
 
             <button
@@ -2191,10 +2425,13 @@ export default function App() {
     fallDetection: true,
     mode: "live",
     alertState: "none",
+    alertReason: "pulso-critico",
+    autoAlerts: true,
     sensorMode: "live",
     spo2ScreenState: "idle",
     spo2Result: "optimal",
     spo2MovementDetected: false,
+    contactResponseStep: 0,
     activeDetail: "none",
     medicalEmpty: false,
     contactsEmpty: false,
@@ -2209,6 +2446,7 @@ export default function App() {
   )
   const shellRef = useRef<HTMLElement | null>(null)
   const gestureStart = useRef<{ x: number; y: number } | null>(null)
+  const autoAlertFired = useRef(false)
 
   useEffect(() => {
     const element = shellRef.current
@@ -2268,20 +2506,77 @@ export default function App() {
     setDemoConfig((curr) => ({ ...curr, alertState: "are-you-ok", activeDetail: "none" }))
   }
 
+  const triggerSosHelp = () => {
+    setActivePage(0)
+    setToastMessage(null)
+    setDemoConfig((curr) => ({
+      ...curr,
+      alertState: "sos-countdown",
+      alertReason: "sos-manual",
+      activeDetail: "none",
+    }))
+  }
+
+  /* Alerta automática: Crítico + Inmóvil abre "¿Estás bien?" tras 3 s.
+     Solo se arma una vez por cambio de estado/modo para no repetirla
+     después de cancelar la alerta. */
+  useEffect(() => {
+    autoAlertFired.current = false
+  }, [demoConfig.variant, demoConfig.mode, demoConfig.autoAlerts])
+
+  useEffect(() => {
+    if (!demoConfig.autoAlerts) return
+    if (demoConfig.variant !== "critical") return
+    if (monitorVariants[demoConfig.variant].movement.label !== "Inmóvil") return
+    if (demoConfig.mode !== "live") return
+    if (demoConfig.alertState !== "none") return
+    if (autoAlertFired.current) return
+
+    const id = window.setTimeout(() => {
+      autoAlertFired.current = true
+      updateDemo({ alertReason: "pulso-critico" })
+      triggerAreYouOk()
+    }, 3000)
+
+    return () => window.clearTimeout(id)
+  }, [
+    demoConfig.variant,
+    demoConfig.mode,
+    demoConfig.alertState,
+    demoConfig.autoAlerts,
+    triggerAreYouOk,
+    updateDemo,
+  ])
+
   const triggerAlertSent = () => {
     setActivePage(0)
     setToastMessage(null)
-    setDemoConfig((curr) => ({ ...curr, alertState: "alert-sent", activeDetail: "none" }))
+    setDemoConfig((curr) => ({
+      ...curr,
+      alertState: "alert-sent",
+      activeDetail: "none",
+      contactResponseStep: 0,
+    }))
+  }
+
+  const showToast = (message: string) => {
+    setToastMessage(message)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => {
+      setToastMessage(null)
+    }, 2000)
   }
 
   const dismissAlertWithToast = () => {
     setActivePage(0)
     setDemoConfig((curr) => ({ ...curr, alertState: "none", activeDetail: "none" }))
-    setToastMessage("Alerta cancelada")
-    if (toastTimer.current) clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => {
-      setToastMessage(null)
-    }, 3500)
+    showToast("Alerta cancelada")
+  }
+
+  const notifyContactsAndDismiss = () => {
+    setActivePage(0)
+    setDemoConfig((curr) => ({ ...curr, alertState: "none", activeDetail: "none" }))
+    showToast("Avisamos a tus contactos")
   }
 
   const dismissAlert = () => {
@@ -2302,8 +2597,10 @@ export default function App() {
         config: demoConfig,
         update: updateDemo,
         triggerAreYouOk,
+        triggerSosHelp,
         triggerAlertSent,
         dismissAlertWithToast,
+        notifyContactsAndDismiss,
         dismissAlert,
         openSpo2Detail,
         closeSpo2Detail,
@@ -2319,6 +2616,8 @@ export default function App() {
           <div
             className="watch-frame"
             onPointerDown={(event) => {
+              // Las pantallas de alerta no permiten gestos de navegación.
+              if (demoConfig.alertState !== "none") return
               if (
                 (event.target as HTMLElement).closest(
                   "button, [role='button'], input, label, .sensor-list-card, .sensor-chip",
@@ -2345,7 +2644,7 @@ export default function App() {
               style={{ transform: `translateY(-${activePage * 100}%)` }}
             >
               <MonitorPage
-                onSos={triggerAreYouOk}
+                onSos={triggerSosHelp}
                 onContacts={() => setActivePage(4)}
               />
               <SensorsPage />
@@ -2372,14 +2671,30 @@ export default function App() {
             {/* Pantalla 1: ¿ESTÁS BIEN? */}
             {demoConfig.alertState === "are-you-ok" && (
               <AreYouOkScreen
+                reasonText={
+                  demoConfig.alertReason === "caida"
+                    ? "Posible caída"
+                    : demoConfig.alertReason === "sos-manual"
+                      ? "SOS manual"
+                      : `Pulso ${monitorVariants.critical.bpm} BPM · Inmóvil`
+                }
                 onSafe={dismissAlertWithToast}
                 onEmergency={triggerAlertSent}
               />
             )}
 
+            {/* SOS manual: 5 s, sin pasar por la confirmación de 30 s */}
+            {demoConfig.alertState === "sos-countdown" && (
+              <SosCountdownScreen
+                onCancel={dismissAlert}
+                onEmergency={triggerAlertSent}
+              />
+            )}
+
+            {/* Marcador: la pantalla "Alerta enviada" completa se ajustará en el siguiente paso */}
             {/* Pantalla 2: ALERTA ENVIADA */}
             {demoConfig.alertState === "alert-sent" && (
-              <AlertSentScreen onCancelAlert={dismissAlertWithToast} />
+              <AlertSentScreen />
             )}
           </div>
         </div>

@@ -35,3 +35,12 @@ This project uses **Tailwind CSS v4** through the `@tailwindcss/vite` plugin con
 `src/main.tsx` imports `src/index.css`, so global font wiring belongs in `src/index.css`. Keep CSS `@import` statements first, then add any `@font-face` rules and font-family defaults there.
 
 Tailwind emits utility classes in `@layer utilities`, and CSS outside any cascade layer overrides every layer regardless of specificity. Put global element styles, such as resets and defaults for `body`, headings, `button`, or `input`, inside `@layer base { ... }` so utility classes on those elements still apply. Tailwind's Preflight already applies `box-sizing: border-box`, removes default margins, and sets `font: inherit` on form controls, so do not repeat those rules.
+
+# Reglas de la app (smartwatch)
+- Reloj circular de 466x466 px, escala uniforme con transform: scale; unidades cqw/rem; fuente Roboto.
+- Zona segura: 14% arriba/abajo y 9% a los lados. Nada toca el borde del círculo.
+- Texto mínimo de 20 px, sin recortes con "…"; áreas táctiles mínimas de 48 px.
+- Botones principales: 70% del ancho, 52 px de alto; color con el token --color-accion-principal.
+- Reutilizar componentes compartidos (botón de regresar, tarjetas). No tocar otras pantallas.
+- Antes de editar, decir qué archivos se van a tocar. No hacer commit.
+- Panel de demo fuera del reloj con el estado global de la app.
