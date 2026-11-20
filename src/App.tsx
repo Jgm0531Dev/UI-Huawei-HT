@@ -33,6 +33,7 @@ export type DemoConfig = {
   spo2Result: Spo2ResultVariant
   spo2MovementDetected: boolean
   contactResponseStep: 0 | 1 | 2
+  demoPanelVisible: boolean
   activeDetail: "none" | "spo2"
   medicalEmpty: boolean
   contactsEmpty: boolean
@@ -1575,14 +1576,21 @@ function CountdownRing({
   value,
   total,
   className = "",
+  emptyClockwise = false,
 }: {
   value: number
   total: number
   className?: string
+  emptyClockwise?: boolean
 }) {
   const radius = 54
   const circumference = 2 * Math.PI * radius
-  const strokeOffset = circumference - (circumference * (total - value)) / total
+  const progressLength = (circumference * value) / total
+  /* En "¿Estás bien?" el frente vacío avanza en sentido horario; en el SOS
+     manual se conserva el sentido original. */
+  const strokeOffset = emptyClockwise
+    ? circumference + progressLength
+    : circumference - progressLength
 
   return (
     <div className={`countdown-ring-container ${className}`}>
@@ -1667,7 +1675,12 @@ function AreYouOkScreen({
         <h2>¿Estás bien?</h2>
       </div>
 
-      <CountdownRing value={seconds} total={30} className="is-vibrating" />
+      <CountdownRing
+        value={seconds}
+        total={30}
+        emptyClockwise
+        className={`is-vibrating is-are-you-ok ${seconds <= 10 ? "is-critical" : ""}`}
+      />
 
       <p className="are-you-ok-reason">{reasonText}</p>
 
@@ -1737,6 +1750,7 @@ function AlertConfirmDialog({
   tone,
   iconName,
   hideCancel = false,
+  showSimulationNote = false,
   onConfirm,
   onCancel,
 }: {
@@ -1747,17 +1761,18 @@ function AlertConfirmDialog({
   tone: "green" | "red"
   iconName: "check" | "phone" | "warning"
   hideCancel?: boolean
+  showSimulationNote?: boolean
   onConfirm: () => void
   onCancel?: () => void
 }) {
   return (
     <div className="alert-confirm-dialog-overlay" role="dialog" aria-modal="true">
-      <div className="alert-confirm-dialog-card">
+      <div className={`alert-confirm-dialog-card ${tone === "red" ? "is-call" : ""}`}>
         <div className={`confirm-warning-icon is-${tone}`}>
           <Icon name={iconName} />
         </div>
         <h3>{title}</h3>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
         <div className="confirm-buttons-stack">
           <button
             type="button"
@@ -1772,6 +1787,9 @@ function AlertConfirmDialog({
             </button>
           )}
         </div>
+        {showSimulationNote && (
+          <p className="alert-simulation-note">Simulación: no se iniciará una llamada real</p>
+        )}
       </div>
     </div>
   )
@@ -1783,7 +1801,12 @@ function AlertSentScreen() {
   const isOffline = config.mode === "offline"
   const isEmpty = config.contactsEmpty
   const responseStep = config.contactResponseStep
-  const isOnWay = responseStep === 2
+  const contacts = [
+    { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656", step: responseStep },
+    { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6", step: 1 },
+  ]
+  /* El contador se congela en cuanto cualquier contacto está en camino. */
+  const isOnWay = contacts.some((contact) => contact.step === 2)
 
   const [nextNoticeSeconds, setNextNoticeSeconds] = useState(300)
   const [confirmation, setConfirmation] = useState<"cancel" | "call" | null>(null)
@@ -1825,22 +1848,23 @@ function AlertSentScreen() {
     return { label: "Enviado", type: "sent", icon: "check" as const }
   }
 
-  const contacts = [
-    { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656", step: responseStep },
-    { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6", step: 1 },
-  ]
-
   return (
     <div className="alert-sent-screen" role="alert" aria-modal="true">
       {/* Cabecera fija */}
       <div className="alert-sent-header">
-        <div className={`alert-sent-check-circle ${isOffline ? "is-offline" : ""}`}>
-          <Icon name={isOffline ? "wifiOff" : "check"} />
+        <div className="alert-sent-title-row">
+          <div className={`alert-sent-check-circle ${isOffline ? "is-offline" : ""}`}>
+            <Icon name={isOffline ? "wifiOff" : "check"} />
+          </div>
+          <h2>Alerta enviada</h2>
         </div>
-        <h2>Alerta enviada</h2>
         <p className="alert-sent-reason">{reasonText}</p>
+      </div>
+
+      {/* Contenido con scroll suave y degradado a negro arriba/abajo */}
+      <div className="alert-sent-content-scroll">
         {isOffline && (
-          <>
+          <div className="alert-offline-block">
             <div className="alert-offline-banner">
               <Icon name="wifiOff" />
               <span>Se enviará al recuperar señal</span>
@@ -1849,12 +1873,9 @@ function AlertSentScreen() {
               <span className="alert-pulsing-dot is-orange" />
               Reintentando…
             </span>
-          </>
+          </div>
         )}
-      </div>
 
-      {/* Contenido con scroll suave y degradado a negro arriba/abajo */}
-      <div className="alert-sent-content-scroll">
         <div className="alert-metrics-card">
           <div className="alert-metric-row">
             <Icon name="heart" />
@@ -1945,11 +1966,12 @@ function AlertSentScreen() {
       {confirmation === "call" && (
         <AlertConfirmDialog
           title="¿Llamar al 911?"
-          description="Simulación: no se iniciará una llamada real."
+          description=""
           confirmLabel="Llamar"
           cancelLabel="Cancelar"
           tone="red"
           iconName="phone"
+          showSimulationNote={config.demoPanelVisible}
           onConfirm={() => setConfirmation(null)}
           onCancel={() => setConfirmation(null)}
         />
@@ -1973,7 +1995,8 @@ function AlertSentScreen() {
 function DemoPanel() {
   const { config, update, triggerAreYouOk, triggerAlertSent, openSpo2Detail, closeSpo2Detail } =
     useDemo()
-  const [isExpanded, setIsExpanded] = useState(true)
+  const isExpanded = config.demoPanelVisible
+  const setExpanded = (visible: boolean) => update({ demoPanelVisible: visible })
   const currentVariant = monitorVariants[config.variant]
 
   const pulseOptions: { id: MonitorVariant; label: string; bpm: number }[] = [
@@ -2010,7 +2033,7 @@ function DemoPanel() {
       <button
         type="button"
         className="demo-floating-trigger"
-        onClick={() => setIsExpanded(true)}
+        onClick={() => setExpanded(true)}
         aria-label="Mostrar panel de demostración"
       >
         <span className="demo-trigger-icon">⚙️</span>
@@ -2034,7 +2057,7 @@ function DemoPanel() {
         <button
           type="button"
           className="demo-collapse-btn"
-          onClick={() => setIsExpanded(false)}
+          onClick={() => setExpanded(false)}
           title="Plegar panel"
           aria-label="Plegar panel de demostración"
         >
@@ -2337,7 +2360,11 @@ function DemoPanel() {
                 <Icon name="warning" className="demo-btn-icon" />
                 <span>Simular alerta</span>
               </div>
-              <small>Lanza ¿Estás bien?</small>
+              <small>
+                {config.alertReason === "sos-manual"
+                  ? "Lanza Pidiendo ayuda en 5"
+                  : "Lanza ¿Estás bien?"}
+              </small>
             </button>
 
             <button
@@ -2407,7 +2434,7 @@ function DemoPanel() {
         <button
           type="button"
           className="demo-hide-link"
-          onClick={() => setIsExpanded(false)}
+          onClick={() => setExpanded(false)}
         >
           Ocultar panel
         </button>
@@ -2432,6 +2459,7 @@ export default function App() {
     spo2Result: "optimal",
     spo2MovementDetected: false,
     contactResponseStep: 0,
+    demoPanelVisible: true,
     activeDetail: "none",
     medicalEmpty: false,
     contactsEmpty: false,
@@ -2500,11 +2528,16 @@ export default function App() {
     setDemoConfig((current) => ({ ...current, ...next }))
   }, [])
 
-  const triggerAreYouOk = () => {
+  const openAreYouOk = useCallback((reason: AlertReason) => {
     setActivePage(0)
     setToastMessage(null)
-    setDemoConfig((curr) => ({ ...curr, alertState: "are-you-ok", activeDetail: "none" }))
-  }
+    setDemoConfig((curr) => ({
+      ...curr,
+      alertState: "are-you-ok",
+      alertReason: reason,
+      activeDetail: "none",
+    }))
+  }, [])
 
   const triggerSosHelp = () => {
     setActivePage(0)
@@ -2515,6 +2548,16 @@ export default function App() {
       alertReason: "sos-manual",
       activeDetail: "none",
     }))
+  }
+
+  /* "¿Estás bien?" solo se usa con Pulso crítico sin movimiento o Posible caída.
+     SOS manual nunca pasa por esta pantalla: va directo a "Pidiendo ayuda en 5". */
+  const triggerAreYouOk = () => {
+    if (demoConfig.alertReason === "sos-manual") {
+      triggerSosHelp()
+      return
+    }
+    openAreYouOk(demoConfig.alertReason)
   }
 
   /* Alerta automática: Crítico + Inmóvil abre "¿Estás bien?" tras 3 s.
@@ -2534,8 +2577,7 @@ export default function App() {
 
     const id = window.setTimeout(() => {
       autoAlertFired.current = true
-      updateDemo({ alertReason: "pulso-critico" })
-      triggerAreYouOk()
+      openAreYouOk("pulso-critico")
     }, 3000)
 
     return () => window.clearTimeout(id)
@@ -2544,8 +2586,7 @@ export default function App() {
     demoConfig.mode,
     demoConfig.alertState,
     demoConfig.autoAlerts,
-    triggerAreYouOk,
-    updateDemo,
+    openAreYouOk,
   ])
 
   const triggerAlertSent = () => {

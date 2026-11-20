@@ -2019,6 +2019,18 @@
   75% { transform: translateX(0.9cqw) rotate(1.5deg); }
 }
 
+/* Halo rojo solo en el borde del círculo, con el centro transparente. */
+@keyframes emergency-halo-pulse {
+  0%, 100% {
+    background: radial-gradient(circle at 50% 50%, rgba(8, 8, 10, 0) 42%, rgba(255, 59, 48, 0.10) 76%, rgba(255, 59, 48, 0.26) 100%) #08080a;
+    box-shadow: inset 0 0 38px rgba(255, 59, 48, 0.18);
+  }
+  50% {
+    background: radial-gradient(circle at 50% 50%, rgba(8, 8, 10, 0) 40%, rgba(255, 59, 48, 0.16) 74%, rgba(255, 59, 48, 0.42) 100%) #08080a;
+    box-shadow: inset 0 0 68px rgba(255, 59, 48, 0.32);
+  }
+}
+
 .are-you-ok-screen,
 .sos-countdown-screen {
   position: absolute;
@@ -2032,6 +2044,23 @@
   padding: 14% 9%;
   text-align: center;
   animation: red-pulse-glow 2s infinite ease-in-out;
+}
+
+/* Ajustes exclusivos de "¿Estás bien?" (el SOS conserva su diseño). */
+.are-you-ok-screen {
+  justify-content: flex-start;
+  gap: 0;
+  animation: emergency-halo-pulse 2s infinite ease-in-out;
+}
+
+.are-you-ok-screen .are-you-ok-header h2 {
+  line-height: 1;
+}
+
+/* 12 px exactos entre el motivo y "Estoy bien". */
+.are-you-ok-screen .are-you-ok-reason {
+  line-height: 1;
+  margin: 0 0 12px;
 }
 
 .are-you-ok-header {
@@ -2089,6 +2118,25 @@
   transition: stroke-dashoffset 950ms linear;
   stroke-linecap: round;
   filter: drop-shadow(0 0 6px rgba(255, 59, 48, 0.6));
+}
+
+/* Arco blanco brillante solo en "¿Estás bien?"; en los últimos 10 s pasa a rojo. */
+.countdown-ring-container.is-are-you-ok .countdown-ring-track {
+  stroke: rgba(255, 255, 255, 0.16);
+}
+
+.countdown-ring-container.is-are-you-ok .countdown-ring-progress {
+  stroke: #ffffff;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.75));
+}
+
+.countdown-ring-container.is-are-you-ok.is-critical .countdown-ring-progress {
+  stroke: #ff3b30;
+  filter: drop-shadow(0 0 6px rgba(255, 59, 48, 0.7));
+}
+
+.countdown-ring-container.is-are-you-ok.is-critical .countdown-number {
+  color: #ff3b30;
 }
 
 .countdown-ring-text {
@@ -2160,6 +2208,11 @@
   transform: scale(0.97);
 }
 
+/* Se distingue del halo rojo del fondo. */
+.are-you-ok-screen .btn-help-now {
+  border: 1.5px solid #ffffff;
+}
+
 .btn-cancel-sos {
   width: 100%;
   height: 48px;
@@ -2192,41 +2245,51 @@
   overflow: hidden;
 }
 
-/* Cabecera fija: check verde, título y motivo en una sola línea */
+/* Cabecera compacta: check de 32 px y título en la misma fila.
+   Altura total ≈106 px (22,8 % del reloj), por debajo del 24 %. */
 .alert-sent-header {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.6cqw;
+  padding: 10% 9% 1cqw;
+}
+
+.alert-sent-title-row {
+  display: flex;
   align-items: center;
-  text-align: center;
-  gap: 0.8cqw;
-  padding: 14% 9% 2cqw;
+  gap: 1.6cqw;
+  height: 32px;
 }
 
 .alert-sent-check-circle {
-  width: 11cqw;
-  height: 11cqw;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: var(--color-green);
   display: grid;
   place-items: center;
   color: #ffffff;
-  box-shadow: 0 0 2cqw rgba(52, 199, 89, 0.45);
+  box-shadow: 0 0 1.4cqw rgba(52, 199, 89, 0.4);
 }
 
 .alert-sent-check-circle.is-offline {
   background: var(--color-orange);
-  box-shadow: 0 0 2cqw rgba(255, 149, 0, 0.45);
+  box-shadow: 0 0 1.4cqw rgba(255, 149, 0, 0.4);
 }
 
 .alert-sent-check-circle .line-icon {
-  width: 6cqw;
-  height: 6cqw;
+  width: 18px;
+  height: 18px;
 }
 
 .alert-sent-header h2 {
   font-size: 5.6cqw;
   font-weight: 700;
+  line-height: 1;
   color: #ffffff;
   margin: 0;
   white-space: nowrap;
@@ -2234,9 +2297,18 @@
 
 .alert-sent-reason {
   font-size: 4.35cqw;
+  line-height: 1;
   color: #d1d1d6;
   margin: 0;
   white-space: nowrap;
+}
+
+.alert-offline-block {
+  width: 70cqw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1cqw;
 }
 
 /* Scroll suave con degradado a negro de 24 px arriba y abajo */
@@ -2369,18 +2441,22 @@
 .alert-status-badge {
   font-size: 4.35cqw;
   font-weight: 600;
+  line-height: 1;
   display: inline-flex;
   align-items: center;
-  gap: 0.6cqw;
-  padding: 0.8cqw 1.2cqw;
+  gap: 0.8cqw;
+  min-height: 8cqw;
+  padding: 0.8cqw 1.6cqw;
   border-radius: 999rem;
   white-space: nowrap;
   flex: 0 0 auto;
+  overflow: visible;
 }
 
 .alert-status-badge .line-icon {
-  width: 4cqw;
-  height: 4cqw;
+  width: 4.4cqw;
+  height: 4.4cqw;
+  flex: 0 0 auto;
 }
 
 .alert-status-badge.is-sent {
@@ -2554,18 +2630,29 @@
   gap: 1.6cqw;
 }
 
+/* Solo el diálogo del 911 es algo más ancho para mantener la nota en una línea. */
+.alert-confirm-dialog-card.is-call {
+  width: 82cqw;
+}
+
+/* Fondo limpio: sin halo verde residual detrás del icono del 911. */
 .confirm-warning-icon {
   width: 12cqw;
   height: 12cqw;
   border-radius: 50%;
-  background: rgba(52, 199, 89, 0.18);
+  background: transparent;
   display: grid;
   place-items: center;
   color: var(--color-green);
+  transition: none;
+}
+
+.confirm-warning-icon.is-green {
+  background: rgba(52, 199, 89, 0.18);
 }
 
 .confirm-warning-icon.is-red {
-  background: rgba(255, 59, 48, 0.18);
+  background: transparent;
   color: var(--color-red);
 }
 
@@ -2586,6 +2673,15 @@
   color: #d1d1d6;
   margin: 0;
   line-height: 1.2;
+}
+
+.alert-simulation-note {
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  text-align: center;
+  color: #8e8e93;
 }
 
 .confirm-buttons-stack {
