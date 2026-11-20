@@ -18,6 +18,15 @@ export type AlertReason = "pulso-critico" | "caida" | "sos-manual"
 export type SensorVariantMode = "live" | "measuring" | "permission"
 export type Spo2ScreenState = "idle" | "measuring" | "result" | "error"
 export type Spo2ResultVariant = "optimal" | "low" | "very-low"
+export type EmergencyContact = {
+  id: string
+  name: string
+  role: string
+  initials: string
+  color: string
+}
+export type Sensitivity = "Baja" | "Media" | "Alta"
+export type NoticeMinutes = 1 | 3 | 5 | 10
 
 export type DemoConfig = {
   variant: MonitorVariant
@@ -36,7 +45,13 @@ export type DemoConfig = {
   demoPanelVisible: boolean
   activeDetail: "none" | "spo2"
   medicalEmpty: boolean
-  contactsEmpty: boolean
+  contacts: EmergencyContact[]
+  contactPickerOpen: boolean
+  dialogOpen: boolean
+  sensitivity: Sensitivity
+  noticeMinutes: NoticeMinutes
+  exerciseMode: boolean
+  batterySaver: boolean
 }
 
 export type DemoContextType = {
@@ -85,6 +100,21 @@ const pages: Page[] = [
 ]
 
 const indicatorAngles = [-27.5, -16.5, -5.5, 5.5, 16.5, 27.5]
+
+/* Lista global: la misma fuente alimenta Contactos y "Alerta enviada". */
+const DEFAULT_CONTACTS: EmergencyContact[] = [
+  { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656" },
+  { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6" },
+  { id: "3", name: "Dra. Elena Ruiz", role: "Médica", initials: "ER", color: "#34c759" },
+  { id: "4", name: "Pedro Morales", role: "Cónyuge", initials: "PM", color: "#ff9500" },
+]
+
+/* BPM a partir del cual se arma la alerta automática. */
+const SENSITIVITY_THRESHOLDS: Record<Sensitivity, number> = {
+  Baja: 130,
+  Media: 110,
+  Alta: 100,
+}
 
 function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
   const rad = (angleDeg * Math.PI) / 180
@@ -498,14 +528,17 @@ function MonitorPage({
         </div>
       )}
 
-      <p className="live-label">
-        <span aria-hidden="true" className={isOffline ? "is-offline" : ""} />
-        {isFirstUse
-          ? "PRIMER USO · CALIBRANDO"
-          : isOffline
-            ? "SIN CONEXIÓN · MODO LOCAL"
-            : "MEDICIÓN EN VIVO"}
-      </p>
+      <div className="monitor-status-line">
+        <p className="live-label">
+          <span aria-hidden="true" className={isOffline ? "is-offline" : ""} />
+          {isFirstUse
+            ? "PRIMER USO · CALIBRANDO"
+            : isOffline
+              ? "SIN CONEXIÓN · MODO LOCAL"
+              : "MEDICIÓN EN VIVO"}
+        </p>
+        {config.exerciseMode && <span className="monitor-exercise-badge">Ejercicio</span>}
+      </div>
 
       <HeartRateGauge variant={variant} isFirstUse={isFirstUse} />
 
@@ -1113,19 +1146,50 @@ function RangePage() {
   const isFirstUse = config.mode === "first-use"
   const variant = monitorVariants[config.variant]
 
-  // Espectro de 40 a 160 BPM
+  /* Espectro de 40 a 160 BPM y curva cuadrática P0(20,52) Q(120,16) P2(220,52). */
   const minBpm = 40
   const maxBpm = 160
-  const currentBpm = isFirstUse ? 75 : variant.bpm
-  const t = Math.max(0.06, Math.min(0.94, (currentBpm - minBpm) / (maxBpm - minBpm)))
-
-  // Curva cuadrática horizontal: P0(20, 52), P1(120, 16), P2(220, 52)
+  const personalRange = isFirstUse ? { min: 60, max: 100 } : { min: 58, max: 92 }
+  const currentBpm = variant.bpm
   const p0 = { x: 20, y: 52 }
   const p1 = { x: 120, y: 16 }
   const p2 = { x: 220, y: 52 }
 
-  const markerX = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x
-  const markerY = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y
+  type CurvePoint = { x: number; y: number }
+  const lerpPoint = (a: CurvePoint, b: CurvePoint, t: number): CurvePoint => ({
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  })
+  const ratioFor = (bpm: number) =>
+    Math.max(0.02, Math.min(0.98, (bpm - minBpm) / (maxBpm - minBpm)))
+  const curvePoint = (bpm: number): CurvePoint => {
+    const t = ratioFor(bpm)
+    return {
+      x: (1 - t) ** 2 * p0.x + 2 * (1 - t) * t * p1.x + t ** 2 * p2.x,
+      y: (1 - t) ** 2 * p0.y + 2 * (1 - t) * t * p1.y + t ** 2 * p2.y,
+    }
+  }
+
+  /* Subcurva exacta del tramo aprendido, obtenida por subdivisión de Bézier:
+     el resaltado y el marcador usan la misma parametrización en BPM. */
+  const highlightPath = () => {
+    const t0 = ratioFor(personalRange.min)
+    const t1 = ratioFor(personalRange.max)
+    const a = lerpPoint(p0, p1, t0)
+    const b = lerpPoint(p1, p2, t0)
+    const c = lerpPoint(a, b, t0)
+    const u = (t1 - t0) / (1 - t0)
+    const d = lerpPoint(c, b, u)
+    const e = lerpPoint(b, p2, u)
+    const f = lerpPoint(d, e, u)
+    return `M ${c.x.toFixed(2)} ${c.y.toFixed(2)} Q ${d.x.toFixed(2)} ${d.y.toFixed(2)} ${f.x.toFixed(2)} ${f.y.toFixed(2)}`
+  }
+
+  const marker = curvePoint(currentBpm)
+  /* Verde dentro del rango, naranja/rojo fuera; gris durante la calibración. */
+  const markerColor = isFirstUse ? "#8e8e93" : variant.color
+  const isInRange =
+    !isFirstUse && currentBpm >= personalRange.min && currentBpm <= personalRange.max
 
   return (
     <section className="watch-page standard-page range-page-wrapper" aria-label="Tu rango normal">
@@ -1133,18 +1197,18 @@ function RangePage() {
 
       <div className="range-main-content">
         <p className="range-condition-label">
-          {isFirstUse ? "Calibración inicial" : "En reposo"}
+          {isFirstUse ? "Aprendiendo tu ritmo" : "En reposo"}
         </p>
 
         <div className="range-hero-numbers">
-          <strong className="range-hero-value">{isFirstUse ? "--" : "58–92"}</strong>
-          <span className="range-hero-unit">BPM</span>
+          <strong className="range-hero-value">
+            {isFirstUse ? "60-100" : "58-92"}
+          </strong>
+          <span className="range-hero-unit">BPM{isFirstUse ? " (general)" : ""}</span>
         </div>
 
-        {/* Barra horizontal curva SVG con rango personal 58-92 BPM y marcador */}
         <div className="range-curved-bar-container">
           <svg className="range-curved-svg" viewBox="0 0 240 70" aria-hidden="true">
-            {/* Pista base curva */}
             <path
               className="range-curved-track"
               d="M 20 52 Q 120 16 220 52"
@@ -1152,48 +1216,41 @@ function RangePage() {
               strokeWidth="9"
               strokeLinecap="round"
             />
-            {/* Tramo del rango personal aprendido (58-92 BPM) */}
-            {!isFirstUse && (
-              <path
-                className="range-curved-highlight"
-                d="M 52 42 Q 120 22 156 36"
-                fill="none"
-                strokeWidth="11"
-                strokeLinecap="round"
-              />
-            )}
-            {/* Marcador del valor actual */}
+            <path
+              className={`range-curved-highlight ${isInRange ? "" : "is-out"}`}
+              d={highlightPath()}
+              fill="none"
+              strokeWidth="11"
+              strokeLinecap="round"
+            />
             <circle
               className="range-curved-marker-shadow"
-              cx={markerX}
-              cy={markerY}
+              cx={marker.x}
+              cy={marker.y}
               r="7.5"
             />
             <circle
               className="range-curved-marker"
-              cx={markerX}
-              cy={markerY}
+              cx={marker.x}
+              cy={marker.y}
               r="6"
-              fill={isFirstUse ? "#8e8e93" : variant.color}
+              fill={markerColor}
             />
           </svg>
         </div>
 
-        {/* Estado actual / días restantes */}
         {isFirstUse ? (
           <div className="range-status-box is-learning">
-            <span className="range-learning-text">
-              Aprendiendo tu ritmo… faltan 5 días
-            </span>
+            <span className="range-learning-text">Faltan 5 días</span>
+            <small className="range-learned-footnote">Rango general 60-100 BPM</small>
           </div>
         ) : (
           <div className="range-status-box">
             <span className="range-current-badge" style={{ color: variant.color }}>
-              Actual: {variant.bpm} BPM ({variant.label})
+              Pulso actual: {currentBpm} BPM
             </span>
-            <small className="range-learned-footnote">
-              Aprendido de tus últimos 7 días
-            </small>
+            <span className="range-resting-line">Pulso en reposo: 64 BPM</span>
+            <small className="range-learned-footnote">Aprendido de tus últimos 7 días</small>
           </div>
         )}
       </div>
@@ -1228,7 +1285,7 @@ function MedicalPage() {
             </p>
             <button
               type="button"
-              className="secondary-button"
+              className="primary-button"
               onClick={() => update({ medicalEmpty: false })}
             >
               Simular datos
@@ -1251,7 +1308,7 @@ function MedicalPage() {
                 <Icon name="warning" />
                 <span>Alergias</span>
               </div>
-              <strong>Penicilina</strong>
+              <strong>Penicilina, mariscos</strong>
             </div>
 
             {/* 3. Medicamentos */}
@@ -1260,16 +1317,16 @@ function MedicalPage() {
                 <Icon name="pill" />
                 <span>Medicamentos</span>
               </div>
-              <strong>Enalapril 10mg</strong>
+              <strong>Enalapril 10 mg · 1 tableta al día</strong>
             </div>
 
             {/* 4. Condición */}
             <div className="info-card medical-row-card">
               <div className="medical-row-label">
                 <Icon name="shield" />
-                <span>Condición</span>
+                <span>Condiciones</span>
               </div>
-              <strong>Hipertensión</strong>
+              <strong>Hipertensión arterial</strong>
             </div>
           </div>
         )}
@@ -1287,25 +1344,62 @@ function MedicalPage() {
    ===================================================================== */
 function ContactsPage({ onBackToMonitor }: { onBackToMonitor: () => void }) {
   const { config, update } = useDemo()
-  const isFirstUse = config.mode === "first-use"
-  const isEmpty = config.contactsEmpty || isFirstUse
+  const contacts = config.contacts
+  const isEmpty = contacts.length === 0
+  const isPickerOpen = config.contactPickerOpen
+  const atLimit = contacts.length >= 5
 
-  const [showPhonePickerModal, setShowPhonePickerModal] = useState(false)
   const [callingName, setCallingName] = useState<string | null>(null)
+  const [contactToRemove, setContactToRemove] = useState<EmergencyContact | null>(null)
+  const [showCall911, setShowCall911] = useState(false)
+  const longPressTimer = useRef<number | null>(null)
+  const callTimer = useRef<number | null>(null)
 
-  const contactsList = [
-    { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656" },
-    { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6" },
-    { id: "3", name: "Dra. Elena Ruiz", role: "Médica", initials: "ER", color: "#34c759" },
-    { id: "4", name: "Pedro Morales", role: "Cónyuge", initials: "PM", color: "#ff9500" },
-    { id: "5", name: "Emergencias 112", role: "Ambulancia", initials: "SOS", color: "#ff3b30" },
-  ]
+  const clearLongPress = () => {
+    if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current)
+    longPressTimer.current = null
+  }
+
+  const startLongPress = (contact: EmergencyContact) => {
+    clearLongPress()
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null
+      setContactToRemove(contact)
+      update({ dialogOpen: true })
+    }, 600)
+  }
+
+  useEffect(
+    () => () => {
+      clearLongPress()
+      if (callTimer.current !== null) window.clearTimeout(callTimer.current)
+    },
+    [],
+  )
 
   const handleCall = (name: string) => {
     setCallingName(name)
-    setTimeout(() => {
-      setCallingName(null)
-    }, 2500)
+    if (callTimer.current !== null) window.clearTimeout(callTimer.current)
+    callTimer.current = window.setTimeout(() => setCallingName(null), 2500)
+  }
+
+  const openPicker = () => update({ contactPickerOpen: true })
+  const closePicker = () => update({ contactPickerOpen: false })
+
+  const closeRemoveDialog = () => {
+    setContactToRemove(null)
+    update({ dialogOpen: false })
+  }
+
+  const openCall911 = () => {
+    clearLongPress()
+    setShowCall911(true)
+    update({ dialogOpen: true })
+  }
+
+  const closeCall911 = () => {
+    setShowCall911(false)
+    update({ dialogOpen: false })
   }
 
   return (
@@ -1321,24 +1415,28 @@ function ContactsPage({ onBackToMonitor }: { onBackToMonitor: () => void }) {
             <div className="empty-icon-bubble">
               <Icon name="user" />
             </div>
-            <strong>Sin contactos</strong>
-            <span>Añade contactos de emergencia</span>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => setShowPhonePickerModal(true)}
-            >
+            <strong>Aún no tienes contactos</strong>
+            <span>Añade a alguien de confianza</span>
+            <button type="button" className="primary-button contacts-primary-action" onClick={openPicker}>
               Añadir
             </button>
           </div>
         ) : (
           <div className="contacts-list-container">
-            {contactsList.map((c) => (
-              <article key={c.id} className="contact-item-row">
-                <div
-                  className="contact-avatar-bubble"
-                  style={{ backgroundColor: c.color }}
-                >
+            {contacts.map((c) => (
+              <article
+                key={c.id}
+                className="contact-item-row"
+                onPointerDown={(event) => {
+                  if ((event.target as HTMLElement).closest("button")) return
+                  startLongPress(c)
+                }}
+                onPointerUp={clearLongPress}
+                onPointerLeave={clearLongPress}
+                onPointerCancel={clearLongPress}
+                aria-label={`${c.name}, ${c.role}. Mantén pulsado para quitar`}
+              >
+                <div className="contact-avatar-bubble" style={{ backgroundColor: c.color }}>
                   {c.initials}
                 </div>
                 <div className="contact-details-col">
@@ -1358,44 +1456,74 @@ function ContactsPage({ onBackToMonitor }: { onBackToMonitor: () => void }) {
 
             <button
               type="button"
-              className="contacts-add-phone-link"
-              onClick={() => setShowPhonePickerModal(true)}
+              className="primary-button contacts-primary-action"
+              onClick={openPicker}
+              disabled={atLimit}
             >
-              + Añadir otro contacto
+              {atLimit ? "Máximo 5 contactos" : "Añadir"}
             </button>
           </div>
         )}
+
+        {/* Servicio de emergencia: fijo, fuera del conteo y no es un contacto. */}
+        <div className="emergency-911-row">
+          <div className="emergency-911-icon">
+            <Icon name="phone" />
+          </div>
+          <div className="contact-details-col">
+            <strong>Emergencias 911</strong>
+            <span>Llamada de emergencia</span>
+          </div>
+          <button
+            type="button"
+            className="emergency-call-red-btn"
+            onClick={openCall911}
+            aria-label="Llamar al 911"
+          >
+            <Icon name="phone" />
+          </button>
+        </div>
       </div>
 
-      {/* Modal / Mensaje: "Elige desde tu teléfono" (no hay teclado en el reloj) */}
-      {showPhonePickerModal && (
+      {/* Alta desde el teléfono: no hay teclado en el reloj. */}
+      {isPickerOpen && (
         <div className="watch-modal-overlay" role="dialog" aria-modal="true">
           <div className="watch-modal-card">
             <div className="modal-phone-icon">
               <Icon name="smartphone" />
             </div>
             <h3>Elige desde tu teléfono</h3>
-            <p>
-              Por comodidad y seguridad, selecciona y administra tus contactos desde la app
-              de salud en tu teléfono.
-            </p>
-            <div className="modal-buttons-row">
-              <button
-                type="button"
-                className="safe-confirm-btn"
-                onClick={() => {
-                  setShowPhonePickerModal(false)
-                  update({ contactsEmpty: false })
-                }}
-              >
-                Entendido
-              </button>
-            </div>
+            <p>Esperando selección en tu teléfono…</p>
+            <button type="button" className="secondary-button contacts-primary-action" onClick={closePicker}>
+              Cancelar
+            </button>
           </div>
         </div>
       )}
 
-      {/* Notificación de llamada en curso */}
+      {contactToRemove && (
+        <AlertConfirmDialog
+          title="¿Quitar contacto?"
+          description={`Se quitará a ${contactToRemove.name} de tus contactos de emergencia.`}
+          confirmLabel="Quitar"
+          cancelLabel="Cancelar"
+          tone="red"
+          iconName="warning"
+          cleanBackground
+          onConfirm={() => {
+            update({
+              contacts: config.contacts.filter((item) => item.id !== contactToRemove.id),
+            })
+            closeRemoveDialog()
+          }}
+          onCancel={closeRemoveDialog}
+        />
+      )}
+
+      {showCall911 && (
+        <Call911Dialog showSimulationNote={config.demoPanelVisible} onClose={closeCall911} />
+      )}
+
       {callingName && (
         <div className="watch-calling-pill" role="status">
           <Icon name="phone" />
@@ -1416,23 +1544,33 @@ function ContactsPage({ onBackToMonitor }: { onBackToMonitor: () => void }) {
    ===================================================================== */
 function SettingsPage() {
   const { config, update } = useDemo()
+  const [vibrationSent, setVibrationSent] = useState(false)
+  const vibrationTimer = useRef<number | null>(null)
 
-  const [sensitivity, setSensitivity] = useState<"Baja" | "Media" | "Alta">("Media")
-  const [noticeTime, setNoticeTime] = useState<"1 min" | "3 min" | "5 min" | "10 min">("5 min")
-  const [exerciseMode, setExerciseMode] = useState(false)
-  const [batterySaver, setBatterySaver] = useState(false)
+  useEffect(
+    () => () => {
+      if (vibrationTimer.current !== null) window.clearTimeout(vibrationTimer.current)
+    },
+    [],
+  )
 
   const cycleSensitivity = () => {
-    if (sensitivity === "Baja") setSensitivity("Media")
-    else if (sensitivity === "Media") setSensitivity("Alta")
-    else setSensitivity("Baja")
+    const order: Sensitivity[] = ["Baja", "Media", "Alta"]
+    const next = order[(order.indexOf(config.sensitivity) + 1) % order.length]
+    update({ sensitivity: next })
   }
 
   const cycleNoticeTime = () => {
-    if (noticeTime === "1 min") setNoticeTime("3 min")
-    else if (noticeTime === "3 min") setNoticeTime("5 min")
-    else if (noticeTime === "5 min") setNoticeTime("10 min")
-    else setNoticeTime("1 min")
+    const order: NoticeMinutes[] = [1, 3, 5, 10]
+    const next = order[(order.indexOf(config.noticeMinutes) + 1) % order.length]
+    update({ noticeMinutes: next })
+  }
+
+  const testVibration = () => {
+    vibrate([120, 80, 120])
+    setVibrationSent(true)
+    if (vibrationTimer.current !== null) window.clearTimeout(vibrationTimer.current)
+    vibrationTimer.current = window.setTimeout(() => setVibrationSent(false), 1600)
   }
 
   return (
@@ -1440,69 +1578,66 @@ function SettingsPage() {
       <PageHeader icon="settings">Ajustes</PageHeader>
 
       <div className="settings-scroll-stack">
-        {/* 1. Sensibilidad: baja / media / alta */}
         <button
           type="button"
           className="info-card setting-row-item"
           onClick={cycleSensitivity}
+          aria-label={`Sensibilidad ${config.sensitivity}. Umbral ${SENSITIVITY_THRESHOLDS[config.sensitivity]} BPM`}
         >
           <div className="setting-label-block">
             <span>Sensibilidad</span>
-            <small>Toca para cambiar</small>
+            <small>Umbral {SENSITIVITY_THRESHOLDS[config.sensitivity]} BPM</small>
           </div>
-          <span className="setting-cycle-badge">{sensitivity}</span>
+          <span className="setting-cycle-badge">{config.sensitivity}</span>
         </button>
 
-        {/* 2. Tiempo entre avisos: 1 / 3 / 5 / 10 min */}
         <button
           type="button"
           className="info-card setting-row-item"
           onClick={cycleNoticeTime}
+          aria-label={`Tiempo entre avisos ${config.noticeMinutes} minutos`}
         >
           <div className="setting-label-block">
-            <span>Tiempo avisos</span>
-            <small>Intervalo de SOS</small>
+            <span>Tiempo entre avisos</span>
+            <small>Próximo aviso: {config.noticeMinutes} min</small>
           </div>
-          <span className="setting-cycle-badge">{noticeTime}</span>
+          <span className="setting-cycle-badge">{config.noticeMinutes} min</span>
         </button>
 
-        {/* 3. Modo ejercicio: interruptor */}
         <button
           type="button"
           className="info-card setting-row-item"
-          onClick={() => setExerciseMode(!exerciseMode)}
+          onClick={() => update({ exerciseMode: !config.exerciseMode })}
         >
           <div className="setting-label-block">
             <span>Modo ejercicio</span>
-            <small>Frecuencia de lectura alta</small>
+            <small>{config.exerciseMode ? "Avisos en pausa" : "Lectura frecuente"}</small>
           </div>
           <span
-            className={`toggle ${exerciseMode ? "on" : ""}`}
-            aria-label={exerciseMode ? "Modo ejercicio activo" : "Modo ejercicio desactivado"}
+            className={`toggle ${config.exerciseMode ? "on" : ""}`}
+            aria-label={config.exerciseMode ? "Modo ejercicio activo" : "Modo ejercicio desactivado"}
           >
             <i />
           </span>
         </button>
 
-        {/* 4. Ahorro de batería: interruptor */}
         <button
           type="button"
           className="info-card setting-row-item"
-          onClick={() => setBatterySaver(!batterySaver)}
+          onClick={() => update({ batterySaver: !config.batterySaver })}
         >
           <div className="setting-label-block">
-            <span>Ahorro batería</span>
+            <span>Ahorro de batería</span>
             <small>Atenúa lecturas de fondo</small>
           </div>
           <span
-            className={`toggle ${batterySaver ? "on" : ""}`}
-            aria-label={batterySaver ? "Ahorro de batería activo" : "Ahorro desactivado"}
+            className={`toggle ${config.batterySaver ? "on" : ""}`}
+            aria-label={config.batterySaver ? "Ahorro de batería activo" : "Ahorro desactivado"}
           >
             <i />
           </span>
         </button>
 
-        {/* 5. Detección de caídas: deshabilitado si el reloj no la tiene */}
         <button
           type="button"
           className={`info-card setting-row-item ${!config.fallDetection ? "is-disabled" : ""}`}
@@ -1518,7 +1653,7 @@ function SettingsPage() {
           }
         >
           <div className="setting-label-block">
-            <span>Detección caídas</span>
+            <span>Detección de caídas</span>
             <small>
               {!config.fallDetection ? "No disponible en tu reloj" : "Acelerómetro continuo"}
             </small>
@@ -1528,6 +1663,21 @@ function SettingsPage() {
             aria-label={config.fallDetection ? "Activada" : "Desactivada"}
           >
             <i />
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="info-card setting-row-item"
+          onClick={testVibration}
+          aria-label="Probar vibración"
+        >
+          <div className="setting-label-block">
+            <span>Probar vibración</span>
+            <small>{vibrationSent ? "Vibración enviada" : "Aviso táctil"}</small>
+          </div>
+          <span className="setting-cycle-badge is-vibration" aria-live="polite">
+            {vibrationSent ? "Listo" : "Probar"}
           </span>
         </button>
       </div>
@@ -1724,7 +1874,7 @@ function SosCountdownScreen({
   return (
     <div className="sos-countdown-screen" role="alertdialog" aria-modal="true">
       <div className="are-you-ok-header">
-        <h2>Pidiendo ayuda en {seconds}</h2>
+        <h2>Pidiendo ayuda</h2>
       </div>
 
       <CountdownRing value={seconds} total={5} className="is-sos" />
@@ -1751,6 +1901,7 @@ function AlertConfirmDialog({
   iconName,
   hideCancel = false,
   showSimulationNote = false,
+  cleanBackground = false,
   onConfirm,
   onCancel,
 }: {
@@ -1762,12 +1913,21 @@ function AlertConfirmDialog({
   iconName: "check" | "phone" | "warning"
   hideCancel?: boolean
   showSimulationNote?: boolean
+  cleanBackground?: boolean
   onConfirm: () => void
   onCancel?: () => void
 }) {
   return (
-    <div className="alert-confirm-dialog-overlay" role="dialog" aria-modal="true">
-      <div className={`alert-confirm-dialog-card ${tone === "red" ? "is-call" : ""}`}>
+    <div
+      className={`alert-confirm-dialog-overlay ${cleanBackground ? "is-clean" : ""}`}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className={`alert-confirm-dialog-card ${tone === "red" ? "is-call" : ""} ${
+          cleanBackground ? "is-clean" : ""
+        }`}
+      >
         <div className={`confirm-warning-icon is-${tone}`}>
           <Icon name={iconName} />
         </div>
@@ -1795,45 +1955,101 @@ function AlertConfirmDialog({
   )
 }
 
+/* Confirmación compartida por Alerta enviada y la fila fija del 911. */
+function Call911Dialog({
+  showSimulationNote,
+  onClose,
+}: {
+  showSimulationNote: boolean
+  onClose: () => void
+}) {
+  return (
+    <AlertConfirmDialog
+      title="¿Llamar al 911?"
+      description=""
+      confirmLabel="Llamar"
+      cancelLabel="Cancelar"
+      tone="red"
+      iconName="phone"
+      showSimulationNote={showSimulationNote}
+      cleanBackground
+      onConfirm={onClose}
+      onCancel={onClose}
+    />
+  )
+}
+
 function AlertSentScreen() {
-  const { config, notifyContactsAndDismiss } = useDemo()
+  const { config, update, notifyContactsAndDismiss } = useDemo()
   const variant = monitorVariants[config.variant]
   const isOffline = config.mode === "offline"
-  const isEmpty = config.contactsEmpty
   const responseStep = config.contactResponseStep
-  const contacts = [
-    { id: "1", name: "María López", role: "Madre", initials: "ML", color: "#e05656", step: responseStep },
-    { id: "2", name: "Carlos Gómez", role: "Hermano", initials: "CG", color: "#32ade6", step: 1 },
-  ]
+  /* Misma lista global que la pantalla Contactos: sin duplicar datos. */
+  const contacts = config.contacts.map((contact, index) => ({
+    ...contact,
+    step: index === 0 ? responseStep : index === 1 ? 1 : 0,
+  }))
+  const isEmpty = contacts.length === 0
   /* El contador se congela en cuanto cualquier contacto está en camino. */
   const isOnWay = contacts.some((contact) => contact.step === 2)
+  const onWayName = contacts.find((contact) => contact.step === 2)?.name ?? ""
 
-  const [nextNoticeSeconds, setNextNoticeSeconds] = useState(300)
+  /* El intervalo elegido en Ajustes define el contador "Próximo aviso". */
+  const noticeSeconds = config.noticeMinutes * 60
+  const [nextNoticeSeconds, setNextNoticeSeconds] = useState(noticeSeconds)
   const [confirmation, setConfirmation] = useState<"cancel" | "call" | null>(null)
   const [showAddContact, setShowAddContact] = useState(false)
   const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
+    setNextNoticeSeconds(noticeSeconds)
+  }, [noticeSeconds])
+
+  useEffect(() => {
     if (isOnWay) return
     timerRef.current = window.setInterval(() => {
-      setNextNoticeSeconds((prev) => (prev > 0 ? prev - 1 : 300))
+      setNextNoticeSeconds((prev) => (prev > 0 ? prev - 1 : noticeSeconds))
     }, 1000)
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [isOnWay])
+  }, [isOnWay, noticeSeconds])
+
+  /* Si la pantalla se cierra con un diálogo abierto, el indicador se restaura. */
+  useEffect(() => () => update({ dialogOpen: false }), [update])
+
+  const openConfirmation = (kind: "cancel" | "call") => {
+    setConfirmation(kind)
+    update({ dialogOpen: true })
+  }
+  const closeConfirmation = () => {
+    setConfirmation(null)
+    update({ dialogOpen: false })
+  }
 
   const minutes = String(Math.floor(nextNoticeSeconds / 60)).padStart(2, "0")
   const secs = String(nextNoticeSeconds % 60).padStart(2, "0")
   const timerDisplay = `${minutes}:${secs}`
 
-  const reasonText = isOffline
-    ? "Sin conexión"
-    : config.alertReason === "caida"
+  const sentReason =
+    config.alertReason === "caida"
       ? "Posible caída"
       : config.alertReason === "sos-manual"
         ? "SOS manual"
         : `Pulso ${variant.bpm} BPM · Inmóvil`
+
+  /* El título refleja el estado real: si no hay contactos no se envió nada. */
+  const isWarning = isEmpty || isOffline
+  const headerTitle = isEmpty
+    ? "Sin contactos"
+    : isOffline
+      ? "Alerta pendiente"
+      : "Alerta enviada"
+  const headerReason = isEmpty
+    ? "No se envió la alerta"
+    : isOffline
+      ? "Sin conexión"
+      : sentReason
 
   const statusFor = (step: number) => {
     if (isOffline) {
@@ -1853,21 +2069,20 @@ function AlertSentScreen() {
       {/* Cabecera fija */}
       <div className="alert-sent-header">
         <div className="alert-sent-title-row">
-          <div className={`alert-sent-check-circle ${isOffline ? "is-offline" : ""}`}>
-            <Icon name={isOffline ? "wifiOff" : "check"} />
+          <div className={`alert-sent-check-circle ${isWarning ? "is-warning" : ""}`}>
+            <Icon name={isWarning ? "warning" : "check"} />
           </div>
-          <h2>Alerta enviada</h2>
+          <h2>{headerTitle}</h2>
         </div>
-        <p className="alert-sent-reason">{reasonText}</p>
+        <p className="alert-sent-reason">{headerReason}</p>
       </div>
 
       {/* Contenido con scroll suave y degradado a negro arriba/abajo */}
       <div className="alert-sent-content-scroll">
-        {isOffline && (
+        {isOffline && !isEmpty && (
           <div className="alert-offline-block">
             <div className="alert-offline-banner">
-              <Icon name="wifiOff" />
-              <span>Se enviará al recuperar señal</span>
+              <span>Sin conexión · se enviará al recuperar señal</span>
             </div>
             <span className="alert-retry-indicator">
               <span className="alert-pulsing-dot is-orange" />
@@ -1875,6 +2090,8 @@ function AlertSentScreen() {
             </span>
           </div>
         )}
+
+        {isOffline && isEmpty && <div className="alert-offline-short">Sin conexión</div>}
 
         <div className="alert-metrics-card">
           <div className="alert-metric-row">
@@ -1918,16 +2135,18 @@ function AlertSentScreen() {
           </div>
         )}
 
-        <div className="alert-timer-banner">
-          <span>Próximo aviso en {timerDisplay}</span>
-          {isOnWay && <span className="alert-onway-note">María va en camino</span>}
-        </div>
+        {!isEmpty && (
+          <div className="alert-timer-banner">
+            <span>Próximo aviso en {timerDisplay}</span>
+            {isOnWay && <span className="alert-onway-note">{onWayName} va en camino</span>}
+          </div>
+        )}
 
         <div className="alert-action-buttons">
           <button
             type="button"
             className={`alert-call-button ${isEmpty ? "is-primary" : ""}`}
-            onClick={() => setConfirmation("call")}
+            onClick={() => openConfirmation("call")}
           >
             Llamar al 911
           </button>
@@ -1940,41 +2159,37 @@ function AlertSentScreen() {
               Añadir contacto
             </button>
           )}
-          <button
-            type="button"
-            className="alert-cancel-button"
-            onClick={() => setConfirmation("cancel")}
-          >
-            Cancelar alerta
-          </button>
+          {!isEmpty && (
+            <button
+              type="button"
+              className="alert-cancel-button"
+              onClick={() => openConfirmation("cancel")}
+            >
+              Cancelar alerta
+            </button>
+          )}
         </div>
       </div>
 
       {confirmation === "cancel" && (
         <AlertConfirmDialog
           title="¿Ya estás bien?"
-          description="Avisaremos a tus contactos"
+          description="Avisaremos a tus contactos que estás bien"
           confirmLabel="Sí, estoy bien"
           cancelLabel="Volver"
           tone="green"
           iconName="check"
-          onConfirm={notifyContactsAndDismiss}
-          onCancel={() => setConfirmation(null)}
+          cleanBackground
+          onConfirm={() => {
+            update({ dialogOpen: false })
+            notifyContactsAndDismiss()
+          }}
+          onCancel={closeConfirmation}
         />
       )}
 
       {confirmation === "call" && (
-        <AlertConfirmDialog
-          title="¿Llamar al 911?"
-          description=""
-          confirmLabel="Llamar"
-          cancelLabel="Cancelar"
-          tone="red"
-          iconName="phone"
-          showSimulationNote={config.demoPanelVisible}
-          onConfirm={() => setConfirmation(null)}
-          onCancel={() => setConfirmation(null)}
-        />
+        <Call911Dialog showSimulationNote={config.demoPanelVisible} onClose={closeConfirmation} />
       )}
 
       {showAddContact && (
@@ -1998,6 +2213,18 @@ function DemoPanel() {
   const isExpanded = config.demoPanelVisible
   const setExpanded = (visible: boolean) => update({ demoPanelVisible: visible })
   const currentVariant = monitorVariants[config.variant]
+
+  const simulateContactAdded = () => {
+    if (config.contacts.length >= 5) return
+    const added: EmergencyContact = {
+      id: `demo-${Date.now()}`,
+      name: "Lucía Fernández",
+      role: "Amiga",
+      initials: "LF",
+      color: "#a55eea",
+    }
+    update({ contacts: [...config.contacts, added], contactPickerOpen: false })
+  }
 
   const pulseOptions: { id: MonitorVariant; label: string; bpm: number }[] = [
     { id: "normal", label: "Normal", bpm: 78 },
@@ -2208,9 +2435,14 @@ function DemoPanel() {
               <button
                 type="button"
                 role="switch"
-                aria-checked={config.contactsEmpty}
-                className={`demo-switch-toggle ${config.contactsEmpty ? "is-on" : ""}`}
-                onClick={() => update({ contactsEmpty: !config.contactsEmpty })}
+                aria-checked={config.contacts.length === 0}
+                className={`demo-switch-toggle ${config.contacts.length === 0 ? "is-on" : ""}`}
+                onClick={() =>
+                  update({
+                    contacts: config.contacts.length === 0 ? DEFAULT_CONTACTS : [],
+                    contactPickerOpen: false,
+                  })
+                }
               >
                 <span className="demo-switch-thumb" />
               </button>
@@ -2386,6 +2618,18 @@ function DemoPanel() {
             <button
               type="button"
               className="demo-action-btn"
+              onClick={simulateContactAdded}
+            >
+              <div className="demo-action-text">
+                <Icon name="users" className="demo-btn-icon" />
+                <span>Simular contacto agregado desde el teléfono</span>
+              </div>
+              <small>{config.contacts.length}/5 contactos</small>
+            </button>
+
+            <button
+              type="button"
+              className="demo-action-btn"
               onClick={triggerAlertSent}
             >
               <div className="demo-action-text">
@@ -2428,6 +2672,27 @@ function DemoPanel() {
             </button>
           </div>
         </div>
+
+        {/* Estado global de los Ajustes, compartido con el reloj */}
+        <div className="demo-group">
+          <span className="demo-group-label">Ajustes activos</span>
+          <div className="demo-state-summary">
+            <span>
+              Sensibilidad: <strong>{config.sensitivity}</strong> · Umbral{" "}
+              {SENSITIVITY_THRESHOLDS[config.sensitivity]} BPM
+            </span>
+            <span>
+              Próximo aviso: <strong>{config.noticeMinutes} min</strong>
+            </span>
+            <span>
+              Modo ejercicio:{" "}
+              <strong>{config.exerciseMode ? "Activo (avisos pausados)" : "Desactivado"}</strong>
+            </span>
+            <span>
+              Ahorro de batería: <strong>{config.batterySaver ? "Activo" : "Desactivado"}</strong>
+            </span>
+          </div>
+        </div>
       </div>
 
       <div className="demo-panel-footer">
@@ -2462,7 +2727,13 @@ export default function App() {
     demoPanelVisible: true,
     activeDetail: "none",
     medicalEmpty: false,
-    contactsEmpty: false,
+    contacts: DEFAULT_CONTACTS,
+    contactPickerOpen: false,
+    dialogOpen: false,
+    sensitivity: "Media",
+    noticeMinutes: 5,
+    exerciseMode: false,
+    batterySaver: false,
   })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const toastTimer = useRef<number | null>(null)
@@ -2497,7 +2768,7 @@ export default function App() {
   }, [])
 
   function finishGesture(event: PointerEvent<HTMLDivElement>) {
-    if (!gestureStart.current || demoConfig.alertState !== "none") return
+    if (!gestureStart.current || demoConfig.alertState !== "none" || demoConfig.dialogOpen) return
 
     const deltaX = (event.clientX - gestureStart.current.x) / watchScale
     const deltaY = (event.clientY - gestureStart.current.y) / watchScale
@@ -2560,20 +2831,28 @@ export default function App() {
     openAreYouOk(demoConfig.alertReason)
   }
 
-  /* Alerta automática: Crítico + Inmóvil abre "¿Estás bien?" tras 3 s.
-     Solo se arma una vez por cambio de estado/modo para no repetirla
-     después de cancelar la alerta. */
+  /* Alerta automática: supera el umbral de sensibilidad (130/110/100 BPM).
+     El estado crítico además requiere inmovilidad; el modo ejercicio pausa
+     los avisos. Solo se arma una vez por cambio de estado/modo/ajuste. */
   useEffect(() => {
     autoAlertFired.current = false
-  }, [demoConfig.variant, demoConfig.mode, demoConfig.autoAlerts])
+  }, [
+    demoConfig.variant,
+    demoConfig.mode,
+    demoConfig.autoAlerts,
+    demoConfig.sensitivity,
+    demoConfig.exerciseMode,
+  ])
 
   useEffect(() => {
     if (!demoConfig.autoAlerts) return
-    if (demoConfig.variant !== "critical") return
-    if (monitorVariants[demoConfig.variant].movement.label !== "Inmóvil") return
+    if (demoConfig.exerciseMode) return
     if (demoConfig.mode !== "live") return
     if (demoConfig.alertState !== "none") return
     if (autoAlertFired.current) return
+    const variant = monitorVariants[demoConfig.variant]
+    if (variant.bpm < SENSITIVITY_THRESHOLDS[demoConfig.sensitivity]) return
+    if (demoConfig.variant === "critical" && variant.movement.label !== "Inmóvil") return
 
     const id = window.setTimeout(() => {
       autoAlertFired.current = true
@@ -2586,6 +2865,8 @@ export default function App() {
     demoConfig.mode,
     demoConfig.alertState,
     demoConfig.autoAlerts,
+    demoConfig.sensitivity,
+    demoConfig.exerciseMode,
     openAreYouOk,
   ])
 
@@ -2658,10 +2939,10 @@ export default function App() {
             className="watch-frame"
             onPointerDown={(event) => {
               // Las pantallas de alerta no permiten gestos de navegación.
-              if (demoConfig.alertState !== "none") return
+              if (demoConfig.alertState !== "none" || demoConfig.dialogOpen) return
               if (
                 (event.target as HTMLElement).closest(
-                  "button, [role='button'], input, label, .sensor-list-card, .sensor-chip",
+                  "button, [role='button'], input, label, .sensor-list-card, .sensor-chip, .contact-item-row",
                 )
               )
                 return
@@ -2695,8 +2976,10 @@ export default function App() {
               <SettingsPage />
             </div>
 
-            {/* Indicador de página lateral continuo */}
-            <PageIndicator active={activePage} onSelect={setActivePage} />
+            {/* Indicador oculto mientras haya una confirmación abierta */}
+            {!demoConfig.dialogOpen && (
+              <PageIndicator active={activePage} onSelect={setActivePage} />
+            )}
 
             {/* Pantalla de detalle OXIGENACIÓN (SpO2) */}
             {demoConfig.activeDetail === "spo2" && (

@@ -173,11 +173,70 @@
   background: var(--color-card);
 }
 
+/* Botones principales compartidos: 70% del ancho y 52 px de alto. */
+.primary-button,
+.secondary-button {
+  width: 70%;
+  min-height: 52px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 999rem;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.primary-button {
+  background: var(--color-accion-principal);
+  color: #ffffff;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.0625rem solid #48484e;
+  color: #ffffff;
+}
+
+.primary-button:disabled {
+  background: #3a3a3c;
+  color: #a1a1aa;
+  cursor: not-allowed;
+}
+
 /* =========================================
    PANTALLA 1: MONITOR
    ========================================= */
 .monitor-page {
   justify-content: space-between;
+}
+
+/* Insignia "Ejercicio": avisos automáticos pausados. */
+.monitor-status-line {
+  width: 76cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.6cqw;
+  flex: 0 0 auto;
+}
+
+.monitor-status-line .live-label {
+  max-width: 50cqw;
+}
+
+.monitor-exercise-badge {
+  flex: 0 0 auto;
+  padding: 0.8cqw 2cqw;
+  border-radius: 999rem;
+  background: rgba(52, 199, 89, 0.14);
+  border: 0.0625rem solid rgba(52, 199, 89, 0.35);
+  color: var(--color-green);
+  font-size: var(--fs-label);
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .live-label {
@@ -1155,20 +1214,21 @@
 }
 
 .range-main-content {
-  width: 72cqw;
+  width: 74cqw;
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.2cqw;
+  gap: 1.6cqw;
   text-align: center;
 }
 
 .range-condition-label {
   color: var(--color-muted);
-  font-size: 3.8cqw;
+  font-size: var(--fs-label);
   margin: 0;
+  white-space: nowrap;
 }
 
 .range-hero-numbers {
@@ -1180,7 +1240,7 @@
 }
 
 .range-hero-value {
-  font-size: 14cqw;
+  font-size: 13.4cqw;
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: -0.04em;
@@ -1188,19 +1248,20 @@
 }
 
 .range-hero-unit {
-  font-size: 4.4cqw;
+  font-size: 4.6cqw;
   font-weight: 600;
   color: var(--color-muted);
+  white-space: nowrap;
 }
 
 /* Barra horizontal curva SVG */
 .range-curved-bar-container {
   width: 66cqw;
-  height: 18cqw;
+  height: 17cqw;
   position: relative;
   display: grid;
   place-items: center;
-  margin: 1cqw 0 0.5cqw;
+  margin: 0.8cqw 0 0.4cqw;
 }
 
 .range-curved-svg {
@@ -1215,7 +1276,11 @@
 
 .range-curved-highlight {
   stroke: var(--color-green);
-  filter: drop-shadow(0 0 6px rgba(52, 199, 89, 0.4));
+  filter: drop-shadow(0 0 6px rgba(52, 199, 89, 0.35));
+}
+
+.range-curved-highlight.is-out {
+  opacity: 0.75;
 }
 
 .range-curved-marker-shadow {
@@ -1233,26 +1298,42 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.8cqw;
-  margin-top: 0.5cqw;
+  gap: 1.1cqw;
+  margin-top: 0.6cqw;
 }
 
 .range-status-box.is-learning {
-  padding: 1.4cqw 3cqw;
-  border-radius: 999rem;
+  padding: 1.8cqw 3.4cqw;
+  border-radius: 4cqw;
   background: rgba(50, 173, 230, 0.12);
-  border: 1px solid rgba(50, 173, 230, 0.3);
+  border: 0.0625rem solid rgba(50, 173, 230, 0.3);
+}
+
+.range-current-badge {
+  font-size: 4.9cqw;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.range-resting-line {
+  font-size: var(--fs-label);
+  color: #d1d1d6;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 .range-learning-text {
-  font-size: 3.6cqw;
+  font-size: var(--fs-label);
   color: #32ade6;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .range-learned-footnote {
   color: var(--color-muted);
-  font-size: 3.3cqw;
+  font-size: var(--fs-label);
+  line-height: 1.15;
   white-space: nowrap;
 }
 
@@ -1266,10 +1347,25 @@
 
 .medical-scroll-container {
   width: 74cqw;
-  max-height: 70cqw;
+  max-height: 63cqw;
   overflow-y: auto;
+  touch-action: pan-y;
   scrollbar-width: none;
-  padding: 0.5cqw 0 4cqw;
+  padding: 24px 0;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
 }
 
 .medical-scroll-container::-webkit-scrollbar {
@@ -1282,12 +1378,15 @@
   gap: 1.8cqw;
 }
 
+/* Etiqueta gris arriba, valor en blanco abajo (hasta dos líneas, sin recorte). */
 .medical-row-card {
-  min-height: 14.5cqw;
+  min-height: 16cqw;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2.2cqw 3.6cqw;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 1.2cqw;
+  padding: 2.4cqw 3.6cqw;
   border-radius: 4cqw;
   background: var(--color-card);
   border: 0.0625rem solid var(--color-border);
@@ -1298,23 +1397,27 @@
   align-items: center;
   gap: 1.8cqw;
   color: #a1a1aa;
-  font-size: 3.5cqw;
+  font-size: var(--fs-label);
 }
 
 .medical-row-label .line-icon {
   width: 4.4cqw;
   height: 4.4cqw;
-  color: var(--color-red);
+  color: inherit;
 }
 
 .medical-row-card strong {
-  font-size: 4cqw;
+  font-size: 4.6cqw;
   font-weight: 600;
   color: #ffffff;
+  line-height: 1.15;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .medical-val-highlight {
-  color: #ff5a52 !important;
+  color: #ffffff !important;
   font-size: 4.6cqw !important;
   font-weight: 700 !important;
 }
@@ -1353,11 +1456,15 @@
 }
 
 .medical-empty-view p {
-  font-size: 3.4cqw;
+  font-size: var(--fs-label);
   color: #8e8e93;
   margin: 0;
-  line-height: 1.25;
-  max-width: 62cqw;
+  line-height: 1.2;
+  max-width: 66cqw;
+}
+
+.medical-empty-view .primary-button {
+  margin-top: 1.5cqw;
 }
 
 /* =========================================
@@ -1365,7 +1472,7 @@
    ========================================= */
 .contacts-page-wrapper {
   justify-content: flex-start;
-  padding: 9% 7% 12%;
+  padding: var(--safe-block) var(--safe-inline);
   gap: 1cqw;
 }
 
@@ -1382,8 +1489,8 @@
    del círculo del reloj. Sin transform ni sombras que lo recorten. */
 .watch-back-48-btn {
   position: absolute;
-  top: 13%;
-  left: 15%;
+  top: 15%;
+  left: 13%;
   width: 48px;
   height: 48px;
   display: grid;
@@ -1407,7 +1514,7 @@
 
 .contacts-scroll-area {
   width: 76cqw;
-  max-height: 66cqw;
+  max-height: 63cqw;
   overflow-y: auto;
   scrollbar-width: none;
   padding: 0.5cqw 0 4cqw;
@@ -1457,17 +1564,16 @@
 }
 
 .contact-details-col strong {
-  font-size: 3.9cqw;
+  font-size: 4.5cqw;
   font-weight: 600;
   color: #ffffff;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.1;
 }
 
 .contact-details-col span {
-  font-size: 3.1cqw;
+  font-size: var(--fs-label);
   color: var(--color-muted);
+  line-height: 1.1;
 }
 
 /* Botón verde de llamar */
@@ -1546,9 +1652,62 @@
 }
 
 .contacts-empty-state span {
-  font-size: 3.4cqw;
+  font-size: var(--fs-label);
   color: var(--color-muted);
-  max-width: 58cqw;
+  max-width: 64cqw;
+  line-height: 1.15;
+}
+
+.contacts-primary-action {
+  margin: 1.6cqw auto 0;
+}
+
+/* Fila fija del 911: no es un contacto, no cuenta para el máximo y no se quita. */
+.emergency-911-row {
+  width: 100%;
+  min-height: 16cqw;
+  display: flex;
+  align-items: center;
+  gap: 1.4cqw;
+  padding: 2cqw 3cqw;
+  margin-top: 2.4cqw;
+  border-radius: 4cqw;
+  background: #141416;
+  border: 0.0625rem dashed #48484e;
+}
+
+.emergency-911-icon {
+  width: 10.5cqw;
+  height: 10.5cqw;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 59, 48, 0.14);
+  color: var(--color-red);
+  display: grid;
+  place-items: center;
+}
+
+.emergency-911-icon .line-icon,
+.emergency-call-red-btn .line-icon {
+  width: 5cqw;
+  height: 5cqw;
+}
+
+.emergency-911-row .contact-details-col {
+  margin-left: 0;
+}
+
+.emergency-call-red-btn {
+  width: var(--touch-min);
+  height: var(--touch-min);
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-accion-principal);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0.5cqw 1.8cqw rgba(255, 59, 48, 0.35);
 }
 
 /* Modal: Elige desde tu teléfono */
@@ -1598,10 +1757,11 @@
 }
 
 .watch-modal-card p {
-  font-size: 3.5cqw;
+  font-size: var(--fs-label);
   color: #a1a1aa;
   margin: 0;
-  line-height: 1.25;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .modal-buttons-row {
@@ -1611,7 +1771,7 @@
 
 .watch-calling-pill {
   position: absolute;
-  bottom: 8cqw;
+  bottom: 15cqw;
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
@@ -1622,11 +1782,11 @@
   border-radius: 999rem;
   background: var(--color-green);
   color: #ffffff;
-  font-size: 3.4cqw;
   font-weight: 700;
   box-shadow: 0 1cqw 3cqw rgba(0, 0, 0, 0.6);
   animation: toast-reveal 200ms ease-out;
   white-space: nowrap;
+  font-size: var(--fs-label);
 }
 
 .watch-calling-pill .line-icon {
@@ -1644,8 +1804,9 @@
 
 .settings-scroll-stack {
   width: 74cqw;
-  max-height: 70cqw;
+  max-height: 63cqw;
   overflow-y: auto;
+  touch-action: pan-y;
   scrollbar-width: none;
   padding: 0.5cqw 0 4cqw;
   display: flex;
@@ -1670,9 +1831,16 @@
 }
 
 .setting-row-item.is-disabled {
-  opacity: 0.4;
+  background: #141416;
   cursor: not-allowed;
-  pointer-events: none;
+}
+
+.setting-row-item.is-disabled .setting-label-block span {
+  color: var(--color-muted);
+}
+
+.setting-row-item.is-disabled .setting-label-block small {
+  color: var(--color-orange);
 }
 
 .setting-label-block {
@@ -1683,25 +1851,33 @@
 }
 
 .setting-label-block span {
-  font-size: 3.8cqw;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: #ffffff;
+  line-height: 1.15;
 }
 
 .setting-label-block small {
-  font-size: 2.9cqw;
+  font-size: var(--fs-label);
   color: #8e8e93;
+  line-height: 1.15;
 }
 
 .setting-cycle-badge {
-  font-size: 3.4cqw;
+  font-size: 4.6cqw;
   font-weight: 700;
   color: #32ade6;
   background: rgba(50, 173, 230, 0.15);
-  padding: 0.6cqw 2.4cqw;
+  padding: 0.9cqw 2cqw;
   border-radius: 999rem;
   border: 1px solid rgba(50, 173, 230, 0.3);
   white-space: nowrap;
+}
+
+.setting-cycle-badge.is-vibration {
+  color: var(--color-green);
+  background: rgba(52, 199, 89, 0.14);
+  border-color: rgba(52, 199, 89, 0.32);
 }
 
 .toggle {
@@ -2001,17 +2177,6 @@
 /* =========================================
    PANTALLA 1: ¿ESTÁS BIEN?
    ========================================= */
-@keyframes red-pulse-glow {
-  0%, 100% {
-    background: radial-gradient(circle at 50% 36%, #2e0505 0%, #150202 65%, #080101 100%);
-    box-shadow: inset 0 0 45px rgba(255, 59, 48, 0.25);
-  }
-  50% {
-    background: radial-gradient(circle at 50% 36%, #4a0707 0%, #240303 65%, #0e0101 100%);
-    box-shadow: inset 0 0 85px rgba(255, 59, 48, 0.55);
-  }
-}
-
 /* Sacudida breve del anillo para simular la vibración */
 @keyframes ring-shake {
   0%, 100% { transform: translateX(0); }
@@ -2043,14 +2208,13 @@
   gap: 0.6cqw;
   padding: 14% 9%;
   text-align: center;
-  animation: red-pulse-glow 2s infinite ease-in-out;
+  animation: emergency-halo-pulse 2s infinite ease-in-out;
 }
 
-/* Ajustes exclusivos de "¿Estás bien?" (el SOS conserva su diseño). */
+/* Ajustes exclusivos de "¿Estás bien?". */
 .are-you-ok-screen {
   justify-content: flex-start;
   gap: 0;
-  animation: emergency-halo-pulse 2s infinite ease-in-out;
 }
 
 .are-you-ok-screen .are-you-ok-header h2 {
@@ -2158,7 +2322,7 @@
 }
 
 .countdown-unit {
-  font-size: 4.35cqw;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1;
   color: #8e8e93;
@@ -2245,22 +2409,25 @@
   overflow: hidden;
 }
 
-/* Cabecera compacta: check de 32 px y título en la misma fila.
-   Altura total ≈106 px (22,8 % del reloj), por debajo del 24 %. */
+/* Cabecera centrada: icono de 32 px + título en una fila de máx. 260 px,
+   motivo en una línea debajo. Empieza en la zona segura del 14 %. */
 .alert-sent-header {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
+  align-items: center;
+  text-align: center;
   gap: 0.6cqw;
-  padding: 10% 9% 1cqw;
+  padding: 14% 9% 1cqw;
 }
 
 .alert-sent-title-row {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 1.6cqw;
+  width: 100%;
+  max-width: 260px;
   height: 32px;
 }
 
@@ -2276,7 +2443,7 @@
   box-shadow: 0 0 1.4cqw rgba(52, 199, 89, 0.4);
 }
 
-.alert-sent-check-circle.is-offline {
+.alert-sent-check-circle.is-warning {
   background: var(--color-orange);
   box-shadow: 0 0 1.4cqw rgba(255, 149, 0, 0.4);
 }
@@ -2287,7 +2454,7 @@
 }
 
 .alert-sent-header h2 {
-  font-size: 5.6cqw;
+  font-size: 5.2cqw;
   font-weight: 700;
   line-height: 1;
   color: #ffffff;
@@ -2296,7 +2463,7 @@
 }
 
 .alert-sent-reason {
-  font-size: 4.35cqw;
+  font-size: 20px;
   line-height: 1;
   color: #d1d1d6;
   margin: 0;
@@ -2304,11 +2471,25 @@
 }
 
 .alert-offline-block {
-  width: 70cqw;
+  width: 82cqw;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1cqw;
+}
+
+.alert-offline-short {
+  width: 82cqw;
+  padding: 1cqw 2cqw;
+  border-radius: 999rem;
+  background: rgba(255, 149, 0, 0.16);
+  border: 1px solid rgba(255, 149, 0, 0.35);
+  color: var(--color-orange);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* Scroll suave con degradado a negro de 24 px arriba y abajo */
@@ -2346,29 +2527,37 @@
 
 /* Variante "Sin conexión: reintentando…" */
 .alert-offline-banner {
+  width: 82cqw;
   display: flex;
   align-items: center;
-  gap: 1.2cqw;
-  padding: 0.8cqw 2.4cqw;
+  justify-content: center;
+  gap: 1cqw;
+  padding: 0.8cqw 1.6cqw;
   border-radius: 999rem;
   background: rgba(255, 149, 0, 0.16);
   border: 1px solid rgba(255, 149, 0, 0.35);
   color: var(--color-orange);
-  font-size: 4.35cqw;
+  font-size: 20px;
   font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.06em;
   white-space: nowrap;
 }
 
-.alert-offline-banner .line-icon {
-  width: 4cqw;
-  height: 4cqw;
+/* Mantiene los 20 px de altura y cabe en una sola línea dentro del círculo. */
+.alert-offline-banner span {
+  display: inline-block;
+  white-space: nowrap;
+  transform: scaleX(0.9);
+  transform-origin: center;
 }
 
 .alert-retry-indicator {
   display: inline-flex;
   align-items: center;
   gap: 1.2cqw;
-  font-size: 4.35cqw;
+  font-size: 20px;
+  line-height: 1;
   color: var(--color-orange);
 }
 
@@ -2531,14 +2720,17 @@
 }
 
 .alert-empty-contacts {
-  width: 70cqw;
-  padding: 3cqw 2.4cqw;
+  width: 82cqw;
+  padding: 3cqw 2cqw;
   border-radius: 3.6cqw;
   background: var(--color-card);
   border: 0.0625rem solid var(--color-border);
   color: var(--color-muted);
-  font-size: 4.35cqw;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: -0.03em;
   text-align: center;
+  white-space: nowrap;
 }
 
 /* Contador: Próximo aviso en 05:00 */
@@ -2611,14 +2803,20 @@
   position: absolute;
   inset: 0;
   z-index: 30;
-  background: rgba(0, 0, 0, 0.88);
-  backdrop-filter: blur(10px);
+  background: #000000;
+  backdrop-filter: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 14% 9%;
   animation: reveal 200ms ease-out;
+}
+
+/* "¿Ya estás bien?": fondo negro limpio, sin blur ni residuos. */
+.alert-confirm-dialog-overlay.is-clean {
+  background: #000000;
+  backdrop-filter: none;
 }
 
 .alert-confirm-dialog-card {
@@ -2630,9 +2828,9 @@
   gap: 1.6cqw;
 }
 
-/* Solo el diálogo del 911 es algo más ancho para mantener la nota en una línea. */
+/* Mismo ancho para las tres confirmaciones; los botones se limitan aparte. */
 .alert-confirm-dialog-card.is-call {
-  width: 82cqw;
+  width: 70cqw;
 }
 
 /* Fondo limpio: sin halo verde residual detrás del icono del 911. */
@@ -2648,7 +2846,7 @@
 }
 
 .confirm-warning-icon.is-green {
-  background: rgba(52, 199, 89, 0.18);
+  background: transparent;
 }
 
 .confirm-warning-icon.is-red {
@@ -2677,19 +2875,28 @@
 
 .alert-simulation-note {
   font-size: 20px;
-  line-height: 1;
+  line-height: 1.2;
   letter-spacing: -0.04em;
-  white-space: nowrap;
+  white-space: normal;
+  max-width: 70cqw;
+  margin: 0 auto;
   text-align: center;
   color: #8e8e93;
 }
 
+.alert-confirm-dialog-card.is-clean p {
+  font-size: 20px;
+  line-height: 1.2;
+  max-width: 70cqw;
+}
+
 .confirm-buttons-stack {
-  width: 100%;
+  width: 70cqw;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 1cqw;
+  margin: 1cqw auto 0;
 }
 
 .confirm-yes-btn,
@@ -2877,6 +3084,24 @@
 
 .demo-group-label-row small {
   font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.demo-state-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 30, 36, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.demo-state-summary strong {
+  color: #ffffff;
   font-weight: 600;
 }
 
